@@ -11,6 +11,7 @@
 #include <unordered_map>
 
 #include <unistd.h>
+#include <cstdlib>
 
 #include <gnb/gnb.hpp>
 #include <lib/app/base_app.hpp>
@@ -200,9 +201,17 @@ static void Loop()
     ReceiveCommand(msg);
 }
 
+static nr::gnb::GNodeB *gnb;
+
+void delete_all() {
+    delete gnb;
+    delete g_cliServer;
+}
+
 int main(int argc, char **argv)
 {
     app::Initialize();
+    std::atexit(delete_all);
     ReadOptions(argc, argv);
 
     std::cout << cons::Name << std::endl;
@@ -213,7 +222,7 @@ int main(int argc, char **argv)
         g_cliRespTask = new app::CliResponseTask(g_cliServer);
     }
 
-    auto *gnb = new nr::gnb::GNodeB(g_refConfig, nullptr, g_cliRespTask);
+    gnb = new nr::gnb::GNodeB(g_refConfig, nullptr, g_cliRespTask);
     g_gnbMap[g_refConfig->name] = gnb;
 
     if (!g_options.disableCmd)

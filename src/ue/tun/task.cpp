@@ -7,7 +7,18 @@
 //
 
 #include "task.hpp"
+#include <arpa/inet.h>
 #include <cstring>
+#include <cstdlib>
+#include <iostream>
+#include <linux/if.h>
+#include <linux/route.h>
+#include <linux/if.h>
+#include <linux/if_tun.h>
+#include <mutex>
+#include <fcntl.h>
+#include <string>
+#include <sys/ioctl.h>
 #include <ue/app/task.hpp>
 #include <ue/nts.hpp>
 #include <unistd.h>
@@ -16,6 +27,10 @@
 
 // TODO: May be reduced to MTU 1500
 #define RECEIVER_BUFFER_SIZE 8000
+
+#define DEFAULT_MTU 1500
+
+static std::mutex configMutex;
 
 struct ReceiverArgs
 {
@@ -74,7 +89,7 @@ static void ReceiverThread(ReceiverArgs *args)
 namespace nr::ue
 {
 
-ue::TunTask::TunTask(TaskBase *base, int psi, int fd) : m_base{base}, m_psi{psi}, m_fd{fd}, m_receiver{}
+ue::TunTask::TunTask(TaskBase *base, int psi) : m_base{base}, m_psi{psi}, m_fd{0}, m_receiver{}
 {
 }
 
@@ -91,6 +106,9 @@ void TunTask::onStart()
 void TunTask::onQuit()
 {
     delete m_receiver;
+    if (this->configureRoute)
+        this->RemoveDefaultIpRoute();
+    this->RemoveIP();
     ::close(m_fd);
 }
 
@@ -118,6 +136,188 @@ void TunTask::onLoop()
     default:
         break;
     }
+}
+
+bool TunTask::TunAllocate(const char *ifname, std::string &error)
+{
+    try
+    {
+        TunTask::AllocateTun(ifname);
+    }
+    catch (const LibError &e)
+    {
+        error = e.what();
+        return false;
+    }
+
+    return true;
+}
+
+bool TunTask::TunConfigure(const std::string &ifname, const std::string &ipAddress, int mtu, bool configureRouting, std::string &error)
+{
+    try
+    {
+        TunTask::ConfigureTun(ifname.c_str(), ipAddress.c_str(), mtu, configureRouting);
+    }
+    catch (const LibError &e)
+    {
+        error = e.what();
+        return false;
+    }
+
+    return true;
+}
+
+void TunTask::AddDefaultIpRoute()
+{
+    defaultIpRouteMgmt(SIOCADDRT);
+}
+
+void TunTask::RemoveDefaultIpRoute()
+{
+    defaultIpRouteMgmt(SIOCDELRT);
+}
+
+void TunTask::defaultIpRouteMgmt(const int method)
+{
+    struct sockaddr_in *addr;
+    // Clear route
+    memset( &this->route, 0, sizeof( this->route ) );
+
+    int fd = socket( PF_INET, SOCK_DGRAM,  IPPROTO_IP);
+
+    // Configure default route
+    this->route.rt_dev = this->if_name;
+    this->route.rt_flags = RTF_UP;
+
+    addr = (struct sockaddr_in*) &this->route.rt_dst;
+    addr->sin_family = AF_INET;
+    addr->sin_addr.s_addr = inet_addr("0.0.0.0");
+
+    addr = (struct sockaddr_in*) &this->route.rt_genmask;
+    addr->sin_family = AF_INET;
+    addr->sin_addr.s_addr = inet_addr("0.0.0.0");
+
+    if (ioctl( fd, method, &this->route ) < 0)
+    {
+        if (method == SIOCADDRT)
+            throw LibError("Default route not added: ioctl(SIOCADDRT) ", errno);
+        else throw LibError("Default route not added: ioctl(SIOCDELRT) ", errno);
+    }
+    close( fd );
+}
+
+void TunTask::AllocateTun(const char *ifName)
+{
+    // acquire the configuration lock
+    const std::lock_guard<std::mutex> lock(configMutex);
+
+    ifreq ifr{};
+
+    if ((m_fd = open("/dev/net/tun", O_RDWR)) < 0)
+        throw LibError("Open failure /dev/net/tun");
+
+    memset(&ifr, 0, sizeof(ifr));
+
+    ifr.ifr_flags = IFF_TUN | IFF_NO_PI;
+
+    strncpy(ifr.ifr_name, ifName, IFNAMSIZ);
+
+    if (ioctl(m_fd, TUNSETIFF, (void *)&ifr) < 0)
+    {
+        close(m_fd);
+        throw LibError("ioctl(TUNSETIFF)", errno);
+    }
+}
+
+void TunTask::ConfigureTun(const char *tunName, const char *ipAddr, int mtu, bool configureRoute)
+{
+    // acquire the configuration lock
+    const std::lock_guard<std::mutex> lock(configMutex);
+
+    // Load into the object
+    strcpy(this->if_name, tunName);
+    strcpy(this->ipAddr, ipAddr);
+    this->mtu = mtu;
+    this->configureRoute = configureRoute;
+
+    TunSetIpAndUp();
+    if (configureRoute)
+    {
+        AddDefaultIpRoute();
+    }
+}
+
+void TunTask::TunSetIpAndUp()
+{
+    ifreq ifr{};
+    memset(&ifr, 0, sizeof(struct ifreq));
+
+    sockaddr_in sai{};
+    memset(&sai, 0, sizeof(struct sockaddr));
+
+    int sockFd;
+    char *p;
+
+    sockFd = socket(AF_INET, SOCK_DGRAM, 0);
+
+    strcpy(ifr.ifr_name, this->if_name);
+
+    sai.sin_family = AF_INET;
+    sai.sin_port = 0;
+
+    sai.sin_addr.s_addr = inet_addr(this->ipAddr);
+
+    p = (char *)&sai;
+    memcpy((((char *)&ifr + offsetof(struct ifreq, ifr_addr))), p, sizeof(struct sockaddr));
+
+    if (ioctl(sockFd, SIOCSIFADDR, &ifr) < 0)
+        throw LibError("ioctl(SIOCSIFADDR)", errno);
+    if (ioctl(sockFd, SIOCGIFFLAGS, &ifr) < 0)
+        throw LibError("ioctl(SIOCGIFFLAGS)", errno);
+
+    ifr.ifr_mtu = this->mtu;
+    if (ioctl(sockFd, SIOCSIFMTU, &ifr) < 0)
+        throw LibError("ioctl(SIOCSIFMTU)", errno);
+
+    ifr.ifr_flags |= IFF_UP | IFF_RUNNING;
+    if (ioctl(sockFd, SIOCSIFFLAGS, &ifr) < 0)
+        throw LibError("ioctl(SIOCSIFFLAGS)", errno);
+
+    close(sockFd);
+}
+
+void TunTask::RemoveIP()
+{
+    ifreq ifr{};
+    memset(&ifr, 0, sizeof(struct ifreq));
+
+    sockaddr_in sai{};
+    memset(&sai, 0, sizeof(struct sockaddr));
+
+    int sockFd;
+    char *p;
+
+    sockFd = socket(AF_INET, SOCK_DGRAM, 0);
+
+    strcpy(ifr.ifr_name, this->if_name);
+
+    sai.sin_family = AF_INET;
+    sai.sin_port = 0;
+
+    sai.sin_addr.s_addr = INADDR_ANY;
+
+    p = (char *)&sai;
+    memcpy((((char *)&ifr + offsetof(struct ifreq, ifr_addr))), p, sizeof(struct sockaddr));
+
+    if (ioctl(sockFd, SIOCSIFADDR, &ifr) < 0)
+        throw LibError("ioctl(SIOCSIFADDR)", errno);
+
+    ifr.ifr_mtu = DEFAULT_MTU;
+    if (ioctl(sockFd, SIOCSIFMTU, &ifr) < 0)
+        throw LibError("ioctl(SIOCSIFMTU)", errno);
+
+    close(sockFd);
 }
 
 } // namespace nr::ue

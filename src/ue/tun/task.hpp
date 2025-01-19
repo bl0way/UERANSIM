@@ -13,9 +13,16 @@
 #include <ue/nts.hpp>
 #include <ue/types.hpp>
 #include <unordered_map>
+#include <linux/if.h>
+#include <linux/route.h>
 #include <utils/logger.hpp>
 #include <utils/nts.hpp>
 #include <vector>
+#include <utils/logger.hpp>
+#include <utils/nts.hpp>
+#include <vector>
+
+#define SIZE_IP_MAX 128
 
 namespace nr::ue
 {
@@ -28,11 +35,29 @@ class TunTask : public NtsTask
     int m_fd;
     ScopedThread *m_receiver;
 
+    // Tun info
+    struct rtentry route;
+    char if_name[IFNAMSIZ];
+    char ipAddr[SIZE_IP_MAX];
+    int mtu;
+    bool configureRoute;
+
+    void defaultIpRouteMgmt(const int method);
+    void AllocateTun(const char *ifName);
+    void ConfigureTun(const char *tunName, const char *ipAddr, int mtu, bool configureRoute);
+    void RemoveDefaultIpRoute();
+    void AddDefaultIpRoute();
+    void TunSetIpAndUp();
+    void RemoveIP();
+
     friend class UeCmdHandler;
 
   public:
-    explicit TunTask(TaskBase *taskBase, int psi, int fd);
+    explicit TunTask(TaskBase *taskBase, int psi);
     ~TunTask() override = default;
+    // Called by the "main" process
+    bool TunAllocate(const char *namePrefix, std::string &error);
+    bool TunConfigure(const std::string &ifname, const std::string &ipAddress, int mtu, bool configureRouting, std::string &error);
 
   protected:
     void onStart() override;

@@ -14,21 +14,23 @@
 #include <cstdlib>
 #include <ctime>
 #include <exception>
+#include <iostream>
 #include <vector>
 
 static std::atomic_int g_instanceCount{};
-static std::vector<void (*)()> g_runAtExit{};
 static std::vector<std::string> g_deleteAtExit{};
 
 extern "C" void BaseSignalHandler(int num)
 {
-    for (auto &fun : g_runAtExit)
-        fun();
     for (auto &file : g_deleteAtExit)
         std::remove(file.c_str());
 
     if (num == SIGTERM || num == SIGINT)
-        exit(0);
+    {
+        std::cout << std::endl << "Exiting..." << std::endl;
+        std::exit(0);
+    }
+
 }
 
 namespace app
@@ -43,11 +45,6 @@ void Initialize()
 
     std::signal(SIGTERM, BaseSignalHandler);
     std::signal(SIGINT, BaseSignalHandler);
-}
-
-void RunAtExit(void (*fun)())
-{
-    g_runAtExit.push_back(fun);
 }
 
 void DeleteAtExit(const std::string &file)
