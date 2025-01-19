@@ -11,7 +11,6 @@
 #include <lib/nas/utils.hpp>
 #include <ue/nas/task.hpp>
 #include <ue/rls/task.hpp>
-#include <ue/tun/tun.hpp>
 #include <utils/common.hpp>
 #include <utils/constants.hpp>
 
@@ -179,32 +178,37 @@ void UeAppTask::setupTunInterface(const PduSession *pduSession)
         return;
     }
 
-    std::string error{}, allocatedName{};
+    std::string error{};
     std::string requestedName = cons::TunNamePrefix;
+
+    auto *task = new TunTask(m_base, psi);
+
     if (m_base->config->tunName.has_value())
         requestedName = *m_base->config->tunName;
-    int fd = tun::TunAllocate(requestedName.c_str(), allocatedName, error);
-    if (fd == 0 || error.length() > 0)
+
+    bool r = task->TunAllocate(requestedName.c_str(), error);
+    if (!r || error.length() > 0)
     {
         m_logger->err("TUN allocation failure [%s]", error.c_str());
+        delete task;
         return;
     }
 
     std::string ipAddress = utils::OctetStringToIp(pduSession->pduAddress->pduAddressInformation);
 
-    bool r = tun::TunConfigure(allocatedName, ipAddress, cons::TunMtu, m_base->config->configureRouting, error);
+    r = task->TunConfigure(requestedName, ipAddress, cons::TunMtu, m_base->config->configureRouting, error);
     if (!r || error.length() > 0)
     {
         m_logger->err("TUN configuration failure [%s]", error.c_str());
         return;
     }
 
-    auto *task = new TunTask(m_base, psi, fd);
+    
     m_tunTasks[psi] = task;
     task->start();
 
-    m_logger->info("Connection setup for PDU session[%d] is successful, TUN interface[%s, %s] is up.", pduSession->psi,
-                   allocatedName.c_str(), ipAddress.c_str());
+    m_logger->info("Connection setup for PDU session[%d] is successful, TUN interface[%s] is up.", pduSession->psi,
+                   ipAddress.c_str());
 }
 
 } // namespace nr::ue

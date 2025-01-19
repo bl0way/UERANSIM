@@ -17,8 +17,6 @@ namespace app
 
 void Initialize();
 
-void RunAtExit(void (*fun)());
-
 void DeleteAtExit(const std::string &file);
 
 } // namespace app

@@ -12,6 +12,7 @@
 #include <thread>
 
 #include <unistd.h>
+#include <cstdlib>
 
 #include <lib/app/base_app.hpp>
 #include <lib/app/cli_base.hpp>
@@ -477,9 +478,19 @@ static class UeController : public app::IUeController
     }
 } g_ueController;
 
+
+static nr::ue::UserEquipment *ue;
+
+void delete_all() {
+    delete ue;
+    delete g_cliServer;
+}
+
 int main(int argc, char **argv)
 {
     app::Initialize();
+
+    std::atexit(delete_all);
 
     try
     {
@@ -505,12 +516,12 @@ int main(int argc, char **argv)
         g_cliRespTask = new app::CliResponseTask(g_cliServer);
     }
 
-    for (int i = 0; i < g_options.count; i++)
-    {
-        auto *config = GetConfigByUe(i);
-        auto *ue = new nr::ue::UserEquipment(config, &g_ueController, nullptr, g_cliRespTask);
-        g_ueMap.put(config->getNodeName(), ue);
-    }
+    // for (int i = 0; i < g_options.count; i++)
+    // {
+    auto *config = GetConfigByUe(0);
+    ue = new nr::ue::UserEquipment(config, &g_ueController, nullptr, g_cliRespTask);
+    g_ueMap.put(config->getNodeName(), ue);
+    // }
 
     if (!g_options.disableCmd)
     {
