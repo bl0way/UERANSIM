@@ -11,11 +11,11 @@ build: FORCE
 	# cmake --build cmake-build-debug --target all
 	cmake --build cmake-build-release --target all
 	
-	cp cmake-build-release/nr-gnb build/
-	cp cmake-build-release/nr-ue build/
-	cp cmake-build-release/nr-cli build/
+	cp cmake-build-release/nr-gnb.elf build/
+	cp cmake-build-release/nr-ue.elf build/
+	cp cmake-build-release/nr-cli.elf build/
 	cp cmake-build-release/libdevbnd.so build/
-	cp tools/nr-binder build/
+	cp tools/nr-binder.elf build/
 
 	@printf "${GREEN}UERANSIM successfully built.${NC}\n"
 
