@@ -89,7 +89,8 @@ void NasMm::performPlmnSelection()
             continue;
         if (nas::utils::ServiceAreaListForbidsPlmn(m_storage->serviceAreaList->get(), nas::utils::PlmnFrom(plmn)))
             continue;
-        if (m_storage->equivalentPlmnList->contains(plmn))
+        // Allow roaming stituations
+        // if (m_storage->equivalentPlmnList->contains(plmn))
             candidates.push_back(plmn);
     }
 
