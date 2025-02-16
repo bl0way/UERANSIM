@@ -254,30 +254,34 @@ void TunTask::TunSetIpAndUp()
     ifreq ifr{};
     memset(&ifr, 0, sizeof(struct ifreq));
 
-    sockaddr_in sai{};
-    memset(&sai, 0, sizeof(struct sockaddr));
+    struct sockaddr_in *sin;
 
-    int sockFd;
-    sockFd = socket(AF_INET, SOCK_DGRAM, 0);
+    int sockFd = socket(AF_INET, SOCK_DGRAM, 0);
 
     strncpy(ifr.ifr_name, this->if_name, IFNAMSIZ);
     ifr.ifr_addr.sa_family = AF_INET;
 
-    inet_pton(AF_INET, this->ipAddr, &sai.sin_addr);
+    sin = (struct sockaddr_in *)&ifr.ifr_addr;
+    sin->sin_family = AF_INET;
+    inet_pton(AF_INET, this->ipAddr, &sin->sin_addr);
 
+    // Set address
     if (ioctl(sockFd, SIOCSIFADDR, &ifr) < 0)
         throw LibError("ioctl(SIOCSIFADDR)", errno);
-    if (ioctl(sockFd, SIOCGIFFLAGS, &ifr) < 0)
-        throw LibError("ioctl(SIOCGIFFLAGS)", errno);
     // Set Mask
-    inet_pton(AF_INET, this->requestedNetmask, &sai.sin_addr);
+    inet_pton(AF_INET, this->requestedNetmask, &sin->sin_addr);
     if (ioctl(sockFd, SIOCSIFNETMASK, &ifr) < 0)
         throw LibError("ioctl(SIOCSIFNETMASK)", errno);
-
+    
+    // Get flags
+    if (ioctl(sockFd, SIOCGIFFLAGS, &ifr) < 0)
+        throw LibError("ioctl(SIOCGIFFLAGS)", errno);
+    // Set MTU 
     ifr.ifr_mtu = this->mtu;
     if (ioctl(sockFd, SIOCSIFMTU, &ifr) < 0)
         throw LibError("ioctl(SIOCSIFMTU)", errno);
 
+    // if up
     ifr.ifr_flags |= IFF_UP | IFF_RUNNING;
     if (ioctl(sockFd, SIOCSIFFLAGS, &ifr) < 0)
         throw LibError("ioctl(SIOCSIFFLAGS)", errno);
