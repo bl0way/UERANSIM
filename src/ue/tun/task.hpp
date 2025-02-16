@@ -39,12 +39,13 @@ class TunTask : public NtsTask
     struct rtentry route;
     char if_name[IFNAMSIZ];
     char ipAddr[SIZE_IP_MAX];
+    char requestedNetmask[SIZE_IP_MAX];
     int mtu;
     bool configureRoute;
 
     void defaultIpRouteMgmt(const int method);
     void AllocateTun(const char *ifName);
-    void ConfigureTun(const char *tunName, const char *ipAddr, int mtu, bool configureRoute);
+    void ConfigureTun(const char *tunName, const char *ipAddr, const char *requestedNetmask, int mtu, bool configureRoute);
     void RemoveDefaultIpRoute();
     void AddDefaultIpRoute();
     void TunSetIpAndUp();
@@ -57,7 +58,8 @@ class TunTask : public NtsTask
     ~TunTask() override = default;
     // Called by the "main" process
     bool TunAllocate(const char *namePrefix, std::string &error);
-    bool TunConfigure(const std::string &ifname, const std::string &ipAddress, int mtu, bool configureRouting, std::string &error);
+    bool TunConfigure(const std::string &ifname, const std::string &ipAddress, const std::string &requestedNetmask, int mtu,
+                      bool configureRouting, std::string &error);
 
   protected:
     void onStart() override;

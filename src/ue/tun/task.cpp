@@ -8,15 +8,14 @@
 
 #include "task.hpp"
 #include <arpa/inet.h>
-#include <cstring>
 #include <cstdlib>
+#include <cstring>
+#include <fcntl.h>
 #include <iostream>
 #include <linux/if.h>
-#include <linux/route.h>
-#include <linux/if.h>
 #include <linux/if_tun.h>
+#include <linux/route.h>
 #include <mutex>
-#include <fcntl.h>
 #include <string>
 #include <sys/ioctl.h>
 #include <ue/app/task.hpp>
@@ -30,7 +29,7 @@
 
 #define DEFAULT_MTU 1500
 
-static std::mutex configMutex;
+    static std::mutex configMutex;
 
 struct ReceiverArgs
 {
@@ -153,11 +152,12 @@ bool TunTask::TunAllocate(const char *ifname, std::string &error)
     return true;
 }
 
-bool TunTask::TunConfigure(const std::string &ifname, const std::string &ipAddress, int mtu, bool configureRouting, std::string &error)
+bool TunTask::TunConfigure(const std::string &ifname, const std::string &ipAddress, const std::string &requestedNetmask,
+                           int mtu, bool configureRouting, std::string &error)
 {
     try
     {
-        TunTask::ConfigureTun(ifname.c_str(), ipAddress.c_str(), mtu, configureRouting);
+        TunTask::ConfigureTun(ifname.c_str(), ipAddress.c_str(), requestedNetmask.c_str(), mtu, configureRouting);
     }
     catch (const LibError &e)
     {
@@ -230,7 +230,7 @@ void TunTask::AllocateTun(const char *ifName)
     }
 }
 
-void TunTask::ConfigureTun(const char *tunName, const char *ipAddr, int mtu, bool configureRoute)
+void TunTask::ConfigureTun(const char *tunName, const char *ipAddr, const char *requestedNetmask, int mtu, bool configureRoute)
 {
     // acquire the configuration lock
     const std::lock_guard<std::mutex> lock(configMutex);
@@ -238,6 +238,7 @@ void TunTask::ConfigureTun(const char *tunName, const char *ipAddr, int mtu, boo
     // Load into the object
     strcpy(this->if_name, tunName);
     strcpy(this->ipAddr, ipAddr);
+    strcpy(this->requestedNetmask, requestedNetmask);
     this->mtu = mtu;
     this->configureRoute = configureRoute;
 
@@ -257,24 +258,21 @@ void TunTask::TunSetIpAndUp()
     memset(&sai, 0, sizeof(struct sockaddr));
 
     int sockFd;
-    char *p;
-
     sockFd = socket(AF_INET, SOCK_DGRAM, 0);
 
-    strcpy(ifr.ifr_name, this->if_name);
+    strncpy(ifr.ifr_name, this->if_name, IFNAMSIZ);
+    ifr.ifr_addr.sa_family = AF_INET;
 
-    sai.sin_family = AF_INET;
-    sai.sin_port = 0;
-
-    sai.sin_addr.s_addr = inet_addr(this->ipAddr);
-
-    p = (char *)&sai;
-    memcpy((((char *)&ifr + offsetof(struct ifreq, ifr_addr))), p, sizeof(struct sockaddr));
+    inet_pton(AF_INET, this->ipAddr, &sai.sin_addr);
 
     if (ioctl(sockFd, SIOCSIFADDR, &ifr) < 0)
         throw LibError("ioctl(SIOCSIFADDR)", errno);
     if (ioctl(sockFd, SIOCGIFFLAGS, &ifr) < 0)
         throw LibError("ioctl(SIOCGIFFLAGS)", errno);
+    // Set Mask
+    inet_pton(AF_INET, this->requestedNetmask, &sai.sin_addr);
+    if (ioctl(sockFd, SIOCSIFNETMASK, &ifr) < 0)
+        throw LibError("ioctl(SIOCSIFNETMASK)", errno);
 
     ifr.ifr_mtu = this->mtu;
     if (ioctl(sockFd, SIOCSIFMTU, &ifr) < 0)
